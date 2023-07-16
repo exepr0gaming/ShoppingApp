@@ -5,16 +5,101 @@
 //  Created by Admin on 16.07.2023.
 //
 
-import SwiftUI
+import Foundation
+import PassKit
 
-struct PaymentCompletionHandler: View {
-    var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+typealias PaymentCompletionHandler = (Bool) -> Void
+
+class PaymentHandler: NSObject {
+  var paymentController: PKPaymentAuthorizationController?
+  var paymentSummaryItems = [PKPaymentSummaryItem]()
+  var paymentStatus = PKPaymentAuthorizationStatus.failure
+  var completionHandler: PaymentCompletionHandler?
+  
+  static let supportedNetworks: [PKPaymentNetwork] = [
+    .visa,
+    .masterCard // can add any other
+  ]
+  
+  // product delivery time
+  func shippingMethodCalculator() -> [PKShippingMethod] {
+    let today = Date()
+    let calendar = Calendar.current
+    
+    let shippingStart = calendar.date(byAdding: .day, value: 5, to: today)
+    let shippingEnd = calendar.date(byAdding: .day, value: 10, to: today)
+    
+    if let shippingEnd, let shippingStart {
+      let startComponents = calendar.dateComponents([.calendar, .year, .month, .day], from: shippingStart)
+      let endComponents = calendar.dateComponents([.calendar, .year, .month, .day], from: shippingEnd)
+      
+      let shippingDelivery = PKShippingMethod(label: "Delivery", amount: NSDecimalNumber(string: "0.00")) // free delivery
+      shippingDelivery.dateComponentsRange = PKDateComponentsRange(start: startComponents, end: endComponents)
+      shippingDelivery.detail = "Sweaters sent to your address"
+      shippingDelivery.identifier = "DELIVERY"
+      
+      return [shippingDelivery]
     }
+    return []
+  }
+  
+  func startPayment(products: [Product], total: Int, completion: @escaping PaymentCompletionHandler) {
+    completionHandler = completion
+    
+    products.forEach { product in
+      let item = PKPaymentSummaryItem(label: product.name, amount: NSDecimalNumber(string: "\(product.price).00"), type: .final)
+      paymentSummaryItems.append(item)
+    }
+    
+    let total = PKPaymentSummaryItem(label: "Total", amount: NSDecimalNumber(string: "\(total).00"), type: .final)
+    paymentSummaryItems.append(total)
+    
+    let paymentRequest = PKPaymentRequest()
+    paymentRequest.paymentSummaryItems = paymentSummaryItems
+    paymentRequest.merchantIdentifier = "merchant.io..." // from apple Merchant IDs
+    paymentRequest.merchantCapabilities = .capability3DS
+    paymentRequest.countryCode = "US"
+    paymentRequest.currencyCode = "USD"
+    paymentRequest.supportedNetworks = PaymentHandler.supportedNetworks
+    paymentRequest.shippingType = .delivery
+    paymentRequest.shippingMethods = shippingMethodCalculator()
+    paymentRequest.requiredShippingContactFields = [.name, .postalAddress]
+    
+    paymentController = PKPaymentAuthorizationController(paymentRequest: paymentRequest)
+    paymentController?.delegate = self
+    paymentController?.present(completion: { presented in
+      if presented {
+        debugPrint("presented payment controller")
+      } else {
+        debugPrint("Failed to present payment controller")
+      }
+    })
+  }
 }
 
-struct PaymentCompletionHandler_Previews: PreviewProvider {
-    static var previews: some View {
-        PaymentCompletionHandler()
+extension PaymentHandler: PKPaymentAuthorizationControllerDelegate {
+  func paymentAuthorizationController(_ controller: PKPaymentAuthorizationController, didAuthorizePayment payment: PKPayment, handler completion: @escaping (PKPaymentAuthorizationResult) -> Void) {
+    let errors = [Error]()
+    let status = PKPaymentAuthorizationStatus.success
+    
+    self.paymentStatus = status
+    completion(PKPaymentAuthorizationResult(status: status, errors: errors))
+  }
+  
+  func paymentAuthorizationControllerDidFinish(_ controller: PKPaymentAuthorizationController) {
+    controller.dismiss {
+      DispatchQueue.main.async {
+        if self.paymentStatus == .success {
+          if let completionHandler = self.completionHandler {
+            completionHandler(true)
+          }
+        } else {
+          if let completionHandler = self.completionHandler {
+            completionHandler(false)
+          }
+        }
+      }
     }
+  }
 }
+

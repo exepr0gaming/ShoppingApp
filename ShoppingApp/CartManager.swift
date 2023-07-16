@@ -5,16 +5,31 @@
 //  Created by Admin on 16.07.2023.
 //
 
-import SwiftUI
+import Foundation
 
-struct CartManager: View {
-    var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+class CartManager: ObservableObject {
+  
+  @Published private(set) var products: [Product] = []
+  @Published private(set) var total: Int = 0
+  
+  let paymentHandler = PaymentHandler()
+  @Published var paymentSuccess = false
+  
+  func addToCart(product: Product) {
+    products.append(product)
+    total += product.price
+  }
+  
+  func removeFromCart(product: Product) {
+    products = products.filter { $0.id != product.id }
+    total -= product.price
+  }
+  
+  func pay() {
+    paymentHandler.startPayment(products: products, total: total) { success in
+      self.paymentSuccess = success
+      self.products = []
+      self.total = 0
     }
-}
-
-struct CartManager_Previews: PreviewProvider {
-    static var previews: some View {
-        CartManager()
-    }
+  }
 }
